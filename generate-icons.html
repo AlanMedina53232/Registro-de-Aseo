@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Iconos PWA</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; background: #f5f5f5; }
+        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2E7D32; margin-bottom: 1rem; }
+        .sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .size-item { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+        canvas { border: 1px solid #ddd; border-radius: 8px; background: white; }
+        button { background: #2E7D32; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+        button:hover { background: #1B5E20; }
+        .download-all { background: #1976D2; margin-top: 1rem; }
+        .download-all:hover { background: #0D47A1; }
+        .note { background: #FFF3E0; border-left: 4px solid #FFB74D; padding: 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Generador de Iconos PWA</h1>
+        <p>Este generador crea los iconos PNG necesarios para la PWA a partir del SVG. Haz clic en "Descargar todos" para obtener un ZIP con todos los tamaños.</p>
+        
+        <div class="note">
+            <strong>Nota:</strong> Los navegadores modernos soportan iconos SVG directamente en el manifest. Si solo vas a usar la app en Chrome/Edge/Firefox/Safari recientes, el archivo <code>icon.svg</code> ya es suficiente. Los PNG son necesarios para compatibilidad con versiones antiguas y para la pantalla de inicio en algunos dispositivos.
+        </div>
+
+        <div class="sizes" id="sizes-container"></div>
+
+        <button id="download-all" class="download-all">📦 Descargar todos los PNG</button>
+    </div>
+
+    <script>
+        const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+        const container = document.getElementById('sizes-container');
+
+        const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2E7D32"/>
+      <stop offset="100%" style="stop-color:#1B5E20"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <g transform="translate(80, 80)">
+    <rect x="0" y="0" width="352" height="352" rx="24" fill="white" opacity="0.15"/>
+    <g fill="white">
+      <rect x="48" y="48" width="104" height="104" rx="12"/>
+      <rect x="200" y="48" width="104" height="104" rx="12"/>
+      <rect x="48" y="200" width="104" height="104" rx="12"/>
+      <rect x="200" y="200" width="104" height="104" rx="12"/>
+      <rect x="64" y="64" width="72" height="72" rx="8" fill="#2E7D32"/>
+      <rect x="216" y="64" width="72" height="72" rx="8" fill="#EF5350"/>
+      <rect x="64" y="216" width="72" height="72" rx="8" fill="#EF5350"/>
+      <rect x="216" y="216" width="72" height="72" rx="8" fill="#2E7D32"/>
+    </g>
+  </g>
+  <text x="256" y="470" font-family="system-ui, sans-serif" font-size="48" font-weight="700" fill="white" text-anchor="middle" opacity="0.9">$</text>
+</svg>`;
+
+        const img = new Image();
+        const svgBlob = new Blob([svgContent], { type: 'image/svg+xml' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        img.src = svgUrl;
+
+        img.onload = () => {
+            sizes.forEach(size => {
+                const div = document.createElement('div');
+                div.className = 'size-item';
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, size, size);
+                
+                const label = document.createElement('span');
+                label.textContent = `${size}x${size}`;
+                label.style.fontSize = '0.8rem';
+                label.style.color = '#666';
+                
+                const downloadBtn = document.createElement('button');
+                downloadBtn.textContent = 'Descargar';
+                downloadBtn.style.padding = '0.4rem 0.8rem';
+                downloadBtn.style.fontSize = '0.8rem';
+                downloadBtn.onclick = () => {
+                    canvas.toBlob(blob => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `icon-${size}.png`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    }, 'image/png');
+                };
+                
+                div.appendChild(canvas);
+                div.appendChild(label);
+                div.appendChild(downloadBtn);
+                container.appendChild(div);
+            });
+        };
+
+        document.getElementById('download-all').onclick = async () => {
+            const zip = new JSZip();
+            const promises = sizes.map(size => {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, size, size);
+                return new Promise(resolve => {
+                    canvas.toBlob(blob => {
+                        zip.file(`icon-${size}.png`, blob);
+                        resolve();
+                    }, 'image/png');
+                });
+            });
+            
+            await Promise.all(promises);
+            const content = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'pwa-icons.zip';
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</body>
+</html>

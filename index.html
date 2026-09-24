@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2E7D32">
+    <meta name="description" content="Gestión de pagos escolares semanales - Primaria Aubanel">
+    <title>Pagos Escolares - Primaria Aubanel</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Pagos Escolares">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1 class="app-title">Primaria Aubanel</h1>
+            <p class="app-subtitle">Control de Pagos Semanales</p>
+        </header>
+
+        <main class="app-main" role="main">
+            <!-- VISTA INICIO - Matriz de Pagos -->
+            <section id="view-home" class="view active" aria-label="Matriz de pagos semanales">
+                <!-- Panel de Registro de Pagos Superior -->
+                <div class="payment-panel" role="region" aria-label="Registro de pagos">
+                    <div class="payment-panel-header">
+                        <h2>Registrar Pago</h2>
+                        <span class="panel-hint">Selecciona alumno y tipo de pago</span>
+                    </div>
+                    <div class="payment-panel-controls">
+                        <div class="control-group">
+                            <label for="payment-student">Alumno</label>
+                            <select id="payment-student" aria-label="Seleccionar alumno">
+                                <option value="">-- Seleccionar alumno --</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="payment-mode">Tipo de pago</label>
+                            <select id="payment-mode" aria-label="Seleccionar tipo de pago">
+                                <option value="single">Pagar una semana</option>
+                                <option value="advance">Adelantar semanas</option>
+                            </select>
+                        </div>
+                        <div class="control-group" id="advance-weeks-group" style="display: none;">
+                            <label for="advance-weeks">Cantidad de semanas a adelantar</label>
+                            <input type="number" id="advance-weeks" min="2" max="52" value="2" placeholder="Ej: 5" aria-label="Número de semanas a adelantar">
+                            <span class="input-hint" id="advance-total-hint">Total: $30</span>
+                        </div>
+                        <div class="control-group control-action">
+                            <button class="btn btn-primary btn-lg" id="btn-register-payment" disabled>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 5v14M5 12h14"></path>
+                                </svg>
+                                <span id="btn-payment-text">Registrar Pago</span>
+                            </button>
+                            <button class="btn btn-secondary btn-lg btn-undo" id="btn-undo-payment" disabled title="Deshacer último pago registrado">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 7v6h6"></path>
+                                    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                                </svg>
+                                Deshacer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel de Eliminar/Revertir Pago Específico -->
+                <div class="payment-panel revert-panel" role="region" aria-label="Eliminar pago específico">
+                    <div class="payment-panel-header">
+                        <h2>Eliminar / Revertir Pago</h2>
+                        <span class="panel-hint">Selecciona alumno y semana para marcar como Pendiente</span>
+                    </div>
+                    <div class="payment-panel-controls">
+                        <div class="control-group">
+                            <label for="revert-student">Alumno</label>
+                            <select id="revert-student" aria-label="Seleccionar alumno">
+                                <option value="">-- Seleccionar alumno --</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="revert-week">Semana</label>
+                            <select id="revert-week" aria-label="Seleccionar semana">
+                                <option value="">-- Seleccionar semana --</option>
+                            </select>
+                        </div>
+                        <div class="control-group control-action">
+                            <button class="btn btn-danger btn-lg" id="btn-revert-payment" disabled>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M20 6H4L5 19h14L19 6z"></path>
+                                    <path d="M18 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path>
+                                    <path d="M10 11v6M14 11v6"></path>
+                                </svg>
+                                Marcar como Pendiente
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container" role="region" aria-label="Tabla de pagos" tabindex="0">
+                    <table id="payments-table" class="payments-table">
+                        <thead>
+                            <tr class="header-row">
+                                <th class="student-header" scope="col">Alumno</th>
+                                <!-- Week columns will be inserted here by JS -->
+                            </tr>
+                            <tr class="week-header-row">
+                                <th class="student-header"></th>
+                                <!-- Week date headers will be inserted here by JS -->
+                            </tr>
+                        </thead>
+                        <tbody id="payments-tbody">
+                            <!-- Student rows will be inserted here by JS -->
+                        </tbody>
+                        <tfoot id="payments-tfoot">
+                            <tr class="summary-row total-row">
+                                <th scope="row">Total</th>
+                                <!-- Total cells will be inserted here by JS -->
+                            </tr>
+                            <tr class="summary-row days-row">
+                                <th scope="row">Días por pagar</th>
+                                <!-- Days selector cells will be inserted here by JS -->
+                            </tr>
+                            <tr class="summary-row payment-row">
+                                <th scope="row">Pago de la semana</th>
+                                <!-- Payment cells will be inserted here by JS -->
+                            </tr>
+                            <tr class="summary-row fund-row">
+                                <th scope="row">Fondo</th>
+                                <!-- Fund cells will be inserted here by JS -->
+                            </tr>
+                            <tr class="summary-row save-row">
+                                <th scope="row">Cerrar Semana</th>
+                                <!-- Save buttons will be inserted here by JS -->
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div class="legend">
+                    <span class="legend-item"><span class="legend-color paid"></span> Pagado</span>
+                    <span class="legend-item"><span class="legend-color pending"></span> Pendiente</span>
+                </div>
+            </section>
+
+            <!-- VISTA FONDO / CAJA -->
+            <section id="view-fund" class="view" aria-label="Fondo y movimientos">
+                <div class="fund-header">
+                    <h2>Fondo / Caja</h2>
+                    <div class="fund-balance" id="fund-balance">$0.00</div>
+                </div>
+                <div class="fund-actions">
+                    <button class="btn btn-primary" id="btn-export-csv">Exportar CSV</button>
+                    <button class="btn btn-secondary" id="btn-export-json">Exportar JSON</button>
+                    <button class="btn btn-secondary" id="btn-print">Imprimir</button>
+                </div>
+                <div class="movements-container">
+                    <table class="movements-table" id="movements-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Fecha</th>
+                                <th scope="col">Semana</th>
+                                <th scope="col">Concepto</th>
+                                <th scope="col">Ingreso</th>
+                                <th scope="col">Egreso</th>
+                                <th scope="col">Saldo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="movements-tbody">
+                            <!-- Movements will be inserted here by JS -->
+                        </tbody>
+                    </table>
+                    <p class="empty-state" id="empty-movements">No hay movimientos registrados</p>
+                </div>
+            </section>
+
+            <!-- VISTA AJUSTES -->
+            <section id="view-settings" class="view" aria-label="Configuración">
+                <div class="settings-section">
+                    <h2>Cuota Semanal</h2>
+                    <div class="setting-item">
+                        <label for="weekly-fee">Cuota por alumno ($)</label>
+                        <input type="number" id="weekly-fee" min="0" step="1" value="15">
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h2>Excepciones por Hermanos</h2>
+                    <p class="settings-hint">Agrupa alumnos que son hermanos para aplicar reglas de excepción en el cobro. Ej: Arechiga Lopez Susana & Arechiga Lopez Zahid</p>
+                    <div id="siblings-container">
+                        <!-- Sibling groups will be rendered here by JS -->
+                    </div>
+                    <button class="btn btn-secondary" id="btn-add-sibling-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 5v14M5 12h14"></path>
+                        </svg>
+                        Agregar Grupo de Hermanos
+                    </button>
+                </div>
+                <div class="settings-section">
+                    <h2>Lista de Alumnos</h2>
+                    <p class="settings-hint">Edita los nombres. Uno por línea: "Apellidos Nombre"</p>
+                    <textarea id="students-list" rows="10" placeholder="Apellidos Nombre&#10;Apellidos Nombre"></textarea>
+                    <button class="btn btn-primary" id="btn-save-students">Guardar Alumnos</button>
+                </div>
+                <div class="settings-section">
+                    <h2>Semanas del Ciclo</h2>
+                    <p class="settings-hint">Formato: "DD-MMM a DD-MMM" (ej. 14-Sep a 18-Sep)</p>
+                    <textarea id="weeks-list" rows="8" placeholder="14-Sep a 18-Sep&#10;21-Sep a 25-Sep"></textarea>
+                    <button class="btn btn-primary" id="btn-save-weeks">Guardar Semanas</button>
+                </div>
+                <div class="settings-section danger-zone">
+                    <h2>Zona de Peligro</h2>
+                    <button class="btn btn-danger" id="btn-reset-all">Restablecer Todo</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- NAVEGACIÓN INFERIOR -->
+        <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">
+            <button class="nav-item active" data-view="home" aria-label="Inicio">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+                <span class="nav-label">Inicio</span>
+            </button>
+            <button class="nav-item" data-view="fund" aria-label="Fondo / Caja">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                </svg>
+                <span class="nav-label">Fondo</span>
+            </button>
+            <button class="nav-item" data-view="settings" aria-label="Ajustes">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span class="nav-label">Ajustes</span>
+            </button>
+        </nav>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(console.error);
+        }
+    </script>
+</body>
+</html>

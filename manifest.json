@@ -1,0 +1,86 @@
+{
+    "name": "Pagos Escolares - Primaria Aubanel",
+    "short_name": "Pagos Escolares",
+    "description": "Aplicación para gestionar la recaudación y pagos escolares semanales de primaria",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#FAFAFA",
+    "theme_color": "#2E7D32",
+    "orientation": "portrait-primary",
+    "scope": "./",
+    "lang": "es-MX",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-72.png",
+            "sizes": "72x72",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-96.png",
+            "sizes": "96x96",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-128.png",
+            "sizes": "128x128",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-144.png",
+            "sizes": "144x144",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-152.png",
+            "sizes": "152x152",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-384.png",
+            "sizes": "384x384",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": ["education", "finance", "productivity"],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "Matriz de Pagos",
+            "short_name": "Pagos",
+            "description": "Ver la matriz de pagos semanales",
+            "url": "./index.html",
+            "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Fondo / Caja",
+            "short_name": "Fondo",
+            "description": "Ver historial de movimientos y balance",
+            "url": "./index.html#fund",
+            "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+        }
+    ]
+}
