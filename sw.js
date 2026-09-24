@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pagos-escolares-v1';
+const CACHE_NAME = 'pagos-escolares-v2';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -40,36 +40,25 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     if (event.request.method !== 'GET') return;
 
+    // NETWORK FIRST strategy: try network first, fallback to cache
     event.respondWith(
-        caches.match(event.request)
-            .then(cachedResponse => {
-                if (cachedResponse) {
-                    event.waitUntil(
-                        fetch(event.request)
-                            .then(networkResponse => {
-                                if (networkResponse.ok) {
-                                    caches.open(CACHE_NAME)
-                                        .then(cache => cache.put(event.request, networkResponse));
-                                }
-                            })
-                            .catch(() => {})
-                    );
-                    return cachedResponse;
+        fetch(event.request)
+            .then(networkResponse => {
+                if (networkResponse.ok) {
+                    const responseClone = networkResponse.clone();
+                    caches.open(CACHE_NAME)
+                        .then(cache => cache.put(event.request, responseClone));
                 }
-
-                return fetch(event.request)
-                    .then(networkResponse => {
-                        if (!networkResponse.ok) {
-                            throw new Error('Network response not ok');
+                return networkResponse;
+            })
+            .catch(() => {
+                // Network failed, try cache
+                return caches.match(event.request)
+                    .then(cachedResponse => {
+                        if (cachedResponse) {
+                            return cachedResponse;
                         }
-
-                        const responseClone = networkResponse.clone();
-                        caches.open(CACHE_NAME)
-                            .then(cache => cache.put(event.request, responseClone));
-
-                        return networkResponse;
-                    })
-                    .catch(() => {
+                        // If no cache and it's a navigation request, return index.html
                         if (event.request.mode === 'navigate') {
                             return caches.match('./index.html');
                         }
