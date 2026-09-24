@@ -1,10 +1,11 @@
-const CACHE_NAME = 'pagos-escolares-v2';
+const CACHE_NAME = 'pagos-escolares-v3';
 const STATIC_ASSETS = [
     './',
     './index.html',
     './styles.css',
     './app.js',
     './data.js',
+    './supabase.js',
     './manifest.json',
     './icon.svg'
 ];
@@ -40,25 +41,39 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     if (event.request.method !== 'GET') return;
 
-    // NETWORK FIRST strategy: try network first, fallback to cache
+    // CACHE FIRST / STALE-WHILE-REVALIDATE strategy
     event.respondWith(
-        fetch(event.request)
-            .then(networkResponse => {
-                if (networkResponse.ok) {
-                    const responseClone = networkResponse.clone();
-                    caches.open(CACHE_NAME)
-                        .then(cache => cache.put(event.request, responseClone));
-                }
-                return networkResponse;
-            })
-            .catch(() => {
-                // Network failed, try cache
-                return caches.match(event.request)
-                    .then(cachedResponse => {
-                        if (cachedResponse) {
-                            return cachedResponse;
+        caches.match(event.request)
+            .then(cachedResponse => {
+                // Fetch from network in background to update cache
+                const fetchPromise = fetch(event.request)
+                    .then(networkResponse => {
+                        if (networkResponse.ok) {
+                            const responseClone = networkResponse.clone();
+                            caches.open(CACHE_NAME)
+                                .then(cache => cache.put(event.request, responseClone));
                         }
-                        // If no cache and it's a navigation request, return index.html
+                        return networkResponse;
+                    })
+                    .catch(() => {
+                        // Network failed, cache will be used
+                    });
+
+                // Return cached response immediately if available
+                if (cachedResponse) {
+                    return cachedResponse;
+                }
+
+                // If no cache, wait for network
+                return fetchPromise
+                    .then(networkResponse => {
+                        if (networkResponse.ok) {
+                            return networkResponse;
+                        }
+                        throw new Error('Network response not ok');
+                    })
+                    .catch(() => {
+                        // If no cache and network failed
                         if (event.request.mode === 'navigate') {
                             return caches.match('./index.html');
                         }

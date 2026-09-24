@@ -659,6 +659,31 @@ async function updateSiblingMember(groupIndex, memberPos, newStudentIndex) {
 }
 
 async function setupEventListeners() {
+    // Online/Offline detection for auto-sync
+    let wasOffline = !navigator.onLine;
+    
+    window.addEventListener('online', async () => {
+        console.log('[App] Connection restored, syncing offline queue...');
+        const result = await DataAPI.syncOfflineQueue();
+        if (result.synced > 0) {
+            console.log(`[App] Synced ${result.synced} operations from offline queue`);
+            // Refresh data from Supabase after sync
+            await loadData();
+            renderTable();
+            renderFundView();
+            renderPaymentPanel();
+            renderRevertPanel();
+            showToast(`Sincronizados ${result.synced} cambios pendientes`);
+        }
+        wasOffline = false;
+    });
+    
+    window.addEventListener('offline', () => {
+        console.log('[App] Gone offline, changes will be queued locally');
+        wasOffline = true;
+        showToast('Modo offline: los cambios se guardarán localmente', 'warning');
+    });
+    
     weeklyFeeInput.addEventListener('change', async () => {
         settings.weeklyFee = parseInt(weeklyFeeInput.value) || DataAPI.DEFAULT_SETTINGS.weeklyFee;
         await DataAPI.saveSettings(settings);
@@ -1112,5 +1137,58 @@ function downloadFile(content, filename, mimeType) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
+
+function showToast(message, type = 'info') {
+    // Remove existing toast if any
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 12px 24px;
+        border-radius: 8px;
+        color: white;
+        font-size: 0.9rem;
+        font-weight: 500;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        animation: slideUp 0.3s ease;
+    `;
+    
+    const colors = {
+        info: '#2196F3',
+        success: '#4CAF50',
+        warning: '#FF9800',
+        error: '#f44336'
+    };
+    toast.style.backgroundColor = colors[type] || colors.info;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideDown 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Add toast animation styles
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideUp {
+        from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+    @keyframes slideDown {
+        from { opacity: 1; transform: translateX(-50%) translateY(0); }
+        to { opacity: 0; transform: translateX(-50%) translateY(20px); }
+    }
+`;
+document.head.appendChild(style);
 
 document.addEventListener('DOMContentLoaded', init);
