@@ -56,15 +56,45 @@ async function init() {
 }
 
 async function loadData() {
+    const isOnline = navigator.onLine;
+    console.log('[loadData] Iniciando carga de datos. Online:', isOnline);
+    
     try {
-        students = await DataAPI.getStudents();
-        weeks = await DataAPI.getWeeks();
-        settings = await DataAPI.getSettings();
-        payments = await DataAPI.getPayments();
-        daysToPay = await DataAPI.getDaysToPay();
-        movements = await DataAPI.getMovements();
-        siblings = await DataAPI.getSiblings();
-        savedWeeks = await DataAPI.getSavedWeeks();
+        // Cargar datos en paralelo - las funciones DataAPI ya leen del localStorage primero
+        const [studentsData, weeksData, settingsData, paymentsData, daysToPayData, movementsData, siblingsData, savedWeeksData] = await Promise.all([
+            DataAPI.getStudents(),
+            DataAPI.getWeeks(),
+            DataAPI.getSettings(),
+            DataAPI.getPayments(),
+            DataAPI.getDaysToPay(),
+            DataAPI.getMovements(),
+            DataAPI.getSiblings(),
+            DataAPI.getSavedWeeks()
+        ]);
+        
+        students = studentsData;
+        weeks = weeksData;
+        settings = settingsData;
+        payments = paymentsData;
+        daysToPay = daysToPayData;
+        movements = movementsData;
+        siblings = siblingsData;
+        savedWeeks = savedWeeksData;
+        
+        console.log('[loadData] Datos cargados exitosamente:', {
+            students: students.length,
+            weeks: weeks.length,
+            settings,
+            paymentsCount: Object.keys(payments).length,
+            movements: movements.length,
+            siblings: siblings.length,
+            savedWeeksCount: Object.keys(savedWeeks).length,
+            source: navigator.onLine ? 'Supabase + Cache' : 'localStorage (Offline)'
+        });
+        
+        // Mostrar indicador visual de estado de conexión
+        updateConnectionIndicator(navigator.onLine);
+        
     } catch (e) {
         console.error('Error loading data:', e);
         // Fallback to defaults
@@ -76,6 +106,9 @@ async function loadData() {
         movements = [];
         siblings = [];
         savedWeeks = {};
+        
+        // Aún así mostrar indicador
+        updateConnectionIndicator(false);
     }
 }
 
@@ -1136,6 +1169,31 @@ function downloadFile(content, filename, mimeType) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+function updateConnectionIndicator(isOnline) {
+    let indicator = document.getElementById('connection-indicator');
+    if (!indicator) {
+        indicator = document.createElement('div');
+        indicator.id = 'connection-indicator';
+        indicator.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            z-index: 1000;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        `;
+        document.body.appendChild(indicator);
+    }
+    
+    indicator.textContent = isOnline ? '🟢 En línea' : '🔴 Sin conexión';
+    indicator.style.backgroundColor = isOnline ? '#4CAF50' : '#f44336';
+    indicator.style.color = 'white';
 }
 
 function showToast(message, type = 'info') {
