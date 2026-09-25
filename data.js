@@ -59,6 +59,19 @@ const PAYMENT_STATUS = {
     ADVANCED: 'advanced'
 };
 
+// Cache keys for localStorage
+const CACHE_KEYS = {
+    students: 'cache_students',
+    weeks: 'cache_weeks',
+    settings: 'cache_settings',
+    payments: 'cache_payments',
+    daysToPay: 'cache_daysToPay',
+    movements: 'cache_movements',
+    siblings: 'cache_siblings',
+    savedWeeks: 'cache_savedWeeks',
+    paymentHistory: 'cache_paymentHistory'
+};
+
 const OFFLINE_QUEUE_KEY = 'pagos_offline_queue';
 const OFFLINE_PAYMENTS_KEY = 'pagos_offline_payments';
 const OFFLINE_DAYS_KEY = 'pagos_offline_days';
@@ -69,6 +82,26 @@ const OFFLINE_HISTORY_KEY = 'pagos_offline_history';
 
 function generatePaymentKey(studentIndex, weekIndex) {
     return `${studentIndex}-${weekIndex}`;
+}
+
+// ==================== CACHE HELPERS ====================
+function getCache(key) {
+    try {
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setCache(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+        return true;
+    } catch (e) {
+        console.error('Error saving cache:', e);
+        return false;
+    }
 }
 
 // ==================== OFFLINE QUEUE HELPERS ====================
@@ -197,24 +230,36 @@ async function executeOfflineOperation(operation) {
 
 // ==================== STUDENTS ====================
 async function getStudents() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('alumnos')
-            .select('id, nombre, orden')
-            .order('orden', { ascending: true });
-        
-        if (error) throw error;
-        
-        if (!data || data.length === 0) {
-            await initializeDefaultStudents();
-            return DEFAULT_STUDENTS;
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('alumnos')
+                .select('id, nombre, orden')
+                .order('orden', { ascending: true });
+            
+            if (error) throw error;
+            
+            if (!data || data.length === 0) {
+                await initializeDefaultStudents();
+                setCache(CACHE_KEYS.students, DEFAULT_STUDENTS);
+                return DEFAULT_STUDENTS;
+            }
+            
+            const students = data.map(d => d.nombre);
+            setCache(CACHE_KEYS.students, students);
+            return students;
+        } catch (e) {
+            console.warn('Failed to fetch students from Supabase:', e);
         }
-        
-        return data.map(d => d.nombre);
-    } catch (e) {
-        console.error('Error getting students:', e);
-        return DEFAULT_STUDENTS;
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.students);
+    if (cached) return cached;
+    
+    // Last resort: defaults
+    return DEFAULT_STUDENTS;
 }
 
 async function saveStudents(students) {
@@ -223,12 +268,14 @@ async function saveStudents(students) {
         const records = students.map((nombre, index) => ({ nombre, orden: index + 1 }));
         const { error } = await supabaseClient.from('alumnos').insert(records);
         if (error) throw error;
+        setCache(CACHE_KEYS.students, students);
         return true;
     } catch (e) {
         console.error('Error saving students:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveStudents', data: students });
-            return true; // Return true as it's saved locally
+            setCache(CACHE_KEYS.students, students); // Update local cache immediately
+            return true;
         }
         return false;
     }
@@ -248,22 +295,34 @@ async function initializeDefaultStudents() {
 
 // ==================== WEEKS ====================
 async function getWeeks() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('semanas')
-            .select('id, nombre, orden')
-            .order('orden', { ascending: true });
-        
-        if (error) throw error;
-        if (!data || data.length === 0) {
-            await initializeDefaultWeeks();
-            return DEFAULT_WEEKS;
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('semanas')
+                .select('id, nombre, orden')
+                .order('orden', { ascending: true });
+            
+            if (error) throw error;
+            
+            if (!data || data.length === 0) {
+                await initializeDefaultWeeks();
+                setCache(CACHE_KEYS.weeks, DEFAULT_WEEKS);
+                return DEFAULT_WEEKS;
+            }
+            
+            const weeks = data.map(d => d.nombre);
+            setCache(CACHE_KEYS.weeks, weeks);
+            return weeks;
+        } catch (e) {
+            console.warn('Failed to fetch weeks from Supabase:', e);
         }
-        return data.map(d => d.nombre);
-    } catch (e) {
-        console.error('Error getting weeks:', e);
-        return DEFAULT_WEEKS;
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.weeks);
+    if (cached) return cached;
+    return DEFAULT_WEEKS;
 }
 
 async function saveWeeks(weeks) {
@@ -272,11 +331,13 @@ async function saveWeeks(weeks) {
         const records = weeks.map((nombre, index) => ({ nombre, orden: index + 1 }));
         const { error } = await supabaseClient.from('semanas').insert(records);
         if (error) throw error;
+        setCache(CACHE_KEYS.weeks, weeks);
         return true;
-    } catch (e) {
+} catch (e) {
         console.error('Error saving weeks:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveWeeks', data: weeks });
+            setCache(CACHE_KEYS.weeks, weeks);
             return true;
         }
         return false;
@@ -297,18 +358,33 @@ async function initializeDefaultWeeks() {
 
 // ==================== SETTINGS ====================
 async function getSettings() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('configuracion')
-            .select('clave, valor')
-            .single();
-        if (error && error.code !== 'PGRST116') throw error;
-        if (!data) return { ...DEFAULT_SETTINGS };
-        return { weeklyFee: parseInt(data.valor?.cuota_semanal) || DEFAULT_SETTINGS.weeklyFee };
-    } catch (e) {
-        console.error('Error getting settings:', e);
-        return { ...DEFAULT_SETTINGS };
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('configuracion')
+                .select('clave, valor')
+                .single();
+            
+            if (error && error.code !== 'PGRST116') throw error;
+            
+            if (!data) {
+                setCache(CACHE_KEYS.settings, DEFAULT_SETTINGS);
+                return { ...DEFAULT_SETTINGS };
+            }
+            
+            const settings = { weeklyFee: parseInt(data.valor?.cuota_semanal) || DEFAULT_SETTINGS.weeklyFee };
+            setCache(CACHE_KEYS.settings, settings);
+            return settings;
+        } catch (e) {
+            console.warn('Failed to fetch settings from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.settings);
+    if (cached) return cached;
+    return { ...DEFAULT_SETTINGS };
 }
 
 async function saveSettings(settings) {
@@ -317,11 +393,13 @@ async function saveSettings(settings) {
             .from('configuracion')
             .upsert({ id: 1, clave: 'settings', valor: { cuota_semanal: settings.weeklyFee } });
         if (error) throw error;
+        setCache(CACHE_KEYS.settings, settings);
         return true;
     } catch (e) {
         console.error('Error saving settings:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveSettings', data: settings });
+            setCache(CACHE_KEYS.settings, settings);
             return true;
         }
         return false;
@@ -337,18 +415,28 @@ async function saveSettingsToSupabase(settings) {
 
 // ==================== PAYMENTS ====================
 async function getPayments() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('pagos')
-            .select('alumno_idx, semana_idx, estado');
-        if (error) throw error;
-        const payments = {};
-        data?.forEach(d => { payments[generatePaymentKey(d.alumno_idx, d.semana_idx)] = d.estado; });
-        return payments;
-    } catch (e) {
-        console.error('Error getting payments:', e);
-        return {};
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('pagos')
+                .select('alumno_idx, semana_idx, estado');
+            
+            if (error) throw error;
+            
+            const payments = {};
+            data?.forEach(d => { payments[generatePaymentKey(d.alumno_idx, d.semana_idx)] = d.estado; });
+            setCache(CACHE_KEYS.payments, payments);
+            return payments;
+        } catch (e) {
+            console.warn('Failed to fetch payments from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.payments);
+    if (cached) return cached;
+    return {};
 }
 
 async function savePayments(payments) {
@@ -357,16 +445,20 @@ async function savePayments(payments) {
             const [alumno_idx, semana_idx] = key.split('-').map(Number);
             return { alumno_idx, semana_idx, estado };
         });
+        
         await supabaseClient.from('pagos').delete().neq('id', 0);
+        
         if (records.length > 0) {
             const { error } = await supabaseClient.from('pagos').insert(records);
             if (error) throw error;
         }
+        setCache(CACHE_KEYS.payments, payments);
         return true;
     } catch (e) {
         console.error('Error saving payments:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'savePayments', data: payments });
+            setCache(CACHE_KEYS.payments, payments);
             return true;
         }
         return false;
@@ -405,18 +497,28 @@ async function updatePayment(studentIndex, weekIndex, status) {
 
 // ==================== DAYS TO PAY ====================
 async function getDaysToPay() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('dias_aseo')
-            .select('semana_idx, dias');
-        if (error) throw error;
-        const days = {};
-        data?.forEach(d => { days[d.semana_idx] = d.dias; });
-        return days;
-    } catch (e) {
-        console.error('Error getting days to pay:', e);
-        return {};
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('dias_aseo')
+                .select('semana_idx, dias');
+            
+            if (error) throw error;
+            
+            const days = {};
+            data?.forEach(d => { days[d.semana_idx] = d.dias; });
+            setCache(CACHE_KEYS.daysToPay, days);
+            return days;
+        } catch (e) {
+            console.warn('Failed to fetch days to pay from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.daysToPay);
+    if (cached) return cached;
+    return {};
 }
 
 async function saveDaysToPay(days) {
@@ -429,11 +531,13 @@ async function saveDaysToPay(days) {
             const { error } = await supabaseClient.from('dias_aseo').insert(records);
             if (error) throw error;
         }
+        setCache(CACHE_KEYS.daysToPay, days);
         return true;
     } catch (e) {
         console.error('Error saving days to pay:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveDaysToPay', data: days });
+            setCache(CACHE_KEYS.daysToPay, days);
             return true;
         }
         return false;
@@ -453,45 +557,81 @@ async function saveDaysToPayToSupabase(days) {
 
 // ==================== MOVEMENTS ====================
 async function getMovements() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('movimientos')
-            .select('id, fecha, semana_idx, tipo, monto, descripcion, saldo')
-            .order('fecha', { ascending: true });
-        if (error) throw error;
-        return data?.map(d => ({
-            id: d.id, date: d.fecha, weekIndex: d.semana_idx,
-            type: d.tipo, amount: Number(d.monto), description: d.descripcion,
-            balance: Number(d.saldo)
-        })) || [];
-    } catch (e) {
-        console.error('Error getting movements:', e);
-        return [];
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('movimientos')
+                .select('id, fecha, semana_idx, tipo, monto, descripcion, saldo')
+                .order('fecha', { ascending: true });
+            
+            if (error) throw error;
+            
+            const movements = data?.map(d => ({
+                id: d.id, date: d.fecha, weekIndex: d.semana_idx,
+                type: d.tipo, amount: Number(d.monto), description: d.descripcion,
+                balance: Number(d.saldo)
+            })) || [];
+            setCache(CACHE_KEYS.movements, movements);
+            return movements;
+        } catch (e) {
+            console.warn('Failed to fetch movements from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.movements);
+    if (cached) return cached;
+    return [];
 }
 
 async function addMovement(type, weekIndex, amount, description) {
     try {
-        const movements = await getMovements();
-        const lastBalance = movements.length > 0 ? movements[movements.length - 1].balance : 0;
+        const cachedMovements = getCache(CACHE_KEYS.movements) || [];
+        const lastBalance = cachedMovements.length > 0 ? cachedMovements[cachedMovements.length - 1].balance : 0;
         const balance = type === 'income' ? lastBalance + amount : lastBalance - amount;
+        
         const { data, error } = await supabaseClient
             .from('movimientos')
             .insert({ fecha: new Date().toISOString(), semana_idx: weekIndex, tipo: type, monto: amount, descripcion: description, saldo: balance })
             .select().single();
+        
         if (error) throw error;
-        return data;
+        
+        // Update local cache
+        const newMovement = {
+            id: data.id, date: data.fecha, weekIndex: data.semana_idx,
+            type: data.tipo, amount: Number(data.monto), description: data.descripcion,
+            balance: Number(data.saldo)
+        };
+        const updatedMovements = [...cachedMovements, newMovement];
+        setCache(CACHE_KEYS.movements, updatedMovements);
+        
+        return newMovement;
     } catch (e) {
         console.error('Error adding movement:', e);
         if (!isOnline()) {
-            addToOfflineQueue({ type: 'addMovement', data: { type, weekIndex, amount, description } });
-            return { 
-                id: `offline-${Date.now()}`, 
-                date: new Date().toISOString(), 
-                weekIndex, type, amount, description,
-                balance: type === 'income' ? (await getMovements()).pop()?.balance + amount || amount : (await getMovements()).pop()?.balance - amount || -amount,
+            // Create optimistic movement for immediate UI update
+            const cachedMovements = getCache(CACHE_KEYS.movements) || [];
+            const lastBalance = cachedMovements.length > 0 ? cachedMovements[cachedMovements.length - 1].balance : 0;
+            const balance = type === 'income' ? lastBalance + amount : lastBalance - amount;
+            
+            const optimisticMovement = {
+                id: `offline-${Date.now()}`,
+                date: new Date().toISOString(),
+                weekIndex,
+                type,
+                amount,
+                description,
+                balance,
                 offline: true
             };
+            
+            const updatedMovements = [...cachedMovements, optimisticMovement];
+            setCache(CACHE_KEYS.movements, updatedMovements);
+            
+            addToOfflineQueue({ type: 'addMovement', data: { type, weekIndex, amount, description } });
+            return optimisticMovement;
         }
         return null;
     }
@@ -511,43 +651,62 @@ async function addMovementToSupabase(type, weekIndex, amount, description) {
 
 // ==================== SIBLINGS ====================
 async function getSiblings() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('hermanos')
-            .select('id, grupo_idx, alumno_idx, pago_compartido')
-            .order('grupo_idx', { ascending: true });
-        if (error) throw error;
-        if (!data || data.length === 0) return [];
-        const groups = {};
-        data.forEach(d => {
-            if (!groups[d.grupo_idx]) groups[d.grupo_idx] = { members: [], sharedPayment: d.pago_compartido };
-            groups[d.grupo_idx].members.push(d.alumno_idx);
-        });
-        return Object.values(groups);
-    } catch (e) {
-        console.error('Error getting siblings:', e);
-        return [];
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('hermanos')
+                .select('id, grupo_idx, alumno_idx, pago_compartido')
+                .order('grupo_idx', { ascending: true });
+            
+            if (error) throw error;
+            
+            if (!data || data.length === 0) {
+                setCache(CACHE_KEYS.siblings, []);
+                return [];
+            }
+            
+            const groups = {};
+            data.forEach(d => {
+                if (!groups[d.grupo_idx]) groups[d.grupo_idx] = { members: [], sharedPayment: d.pago_compartido };
+                groups[d.grupo_idx].members.push(d.alumno_idx);
+            });
+            const siblings = Object.values(groups);
+            setCache(CACHE_KEYS.siblings, siblings);
+            return siblings;
+        } catch (e) {
+            console.warn('Failed to fetch siblings from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.siblings);
+    if (cached) return cached;
+    return [];
 }
 
 async function saveSiblings(siblings) {
     try {
         await supabaseClient.from('hermanos').delete().neq('id', 0);
+        
         const records = [];
         siblings.forEach((group, grupo_idx) => {
             group.members.forEach(alumno_idx => {
                 records.push({ grupo_idx, alumno_idx, pago_compartido: group.sharedPayment });
             });
         });
+        
         if (records.length > 0) {
             const { error } = await supabaseClient.from('hermanos').insert(records);
             if (error) throw error;
         }
+        setCache(CACHE_KEYS.siblings, siblings);
         return true;
     } catch (e) {
         console.error('Error saving siblings:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveSiblings', data: siblings });
+            setCache(CACHE_KEYS.siblings, siblings);
             return true;
         }
         return false;
@@ -585,18 +744,28 @@ function isSiblingException(studentIndex, siblings) {
 
 // ==================== SAVED WEEKS ====================
 async function getSavedWeeks() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('semanas_cerradas')
-            .select('semana_idx');
-        if (error) throw error;
-        const saved = {};
-        data?.forEach(d => { saved[d.semana_idx] = true; });
-        return saved;
-    } catch (e) {
-        console.error('Error getting saved weeks:', e);
-        return {};
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('semanas_cerradas')
+                .select('semana_idx');
+            
+            if (error) throw error;
+            
+            const saved = {};
+            data?.forEach(d => { saved[d.semana_idx] = true; });
+            setCache(CACHE_KEYS.savedWeeks, saved);
+            return saved;
+        } catch (e) {
+            console.warn('Failed to fetch saved weeks from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.savedWeeks);
+    if (cached) return cached;
+    return {};
 }
 
 async function saveWeek(weekIndex) {
@@ -605,18 +774,25 @@ async function saveWeek(weekIndex) {
             .from('semanas_cerradas')
             .upsert({ semana_idx: weekIndex }, { onConflict: 'semana_idx' });
         if (error) throw error;
+        
+        const saved = getCache(CACHE_KEYS.savedWeeks) || {};
+        saved[weekIndex] = true;
+        setCache(CACHE_KEYS.savedWeeks, saved);
         return true;
     } catch (e) {
         console.error('Error saving week:', e);
         if (!isOnline()) {
             addToOfflineQueue({ type: 'saveWeek', data: weekIndex });
+            const saved = getCache(CACHE_KEYS.savedWeeks) || {};
+            saved[weekIndex] = true;
+            setCache(CACHE_KEYS.savedWeeks, saved);
             return true;
-        }
-        return false;
-    }
 }
+            return false;
+        }
+    }
 
-async function saveWeekToSupabase(weekIndex) {
+    async function saveWeekToSupabase(weekIndex) {
     const { error } = await supabaseClient
         .from('semanas_cerradas')
         .upsert({ semana_idx: weekIndex }, { onConflict: 'semana_idx' });
@@ -625,29 +801,54 @@ async function saveWeekToSupabase(weekIndex) {
 
 // ==================== PAYMENT HISTORY ====================
 async function getPaymentHistory() {
-    try {
-        const { data, error } = await supabaseClient
-            .from('historial_pagos')
-            .select('id, fecha, alumno_idx, semana_idx, monto, es_compartido, hermanos_idx')
-            .order('fecha', { ascending: true });
-        if (error) throw error;
-        return data?.map(d => ({
-            id: d.id, date: d.fecha, studentIndex: d.alumno_idx,
-            weekIndex: d.semana_idx, amount: Number(d.monto),
-            isSharedPayment: d.es_compartido, siblingIndices: d.hermanos_idx || []
-        })) || [];
-    } catch (e) {
-        console.error('Error getting payment history:', e);
-        return [];
+    // Try to fetch from Supabase
+    if (isOnline()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('historial_pagos')
+                .select('id, fecha, alumno_idx, semana_idx, monto, es_compartido, hermanos_idx')
+                .order('fecha', { ascending: true });
+            
+            if (error) throw error;
+            
+            const history = data?.map(d => ({
+                id: d.id, date: d.fecha, studentIndex: d.alumno_idx,
+                weekIndex: d.semana_idx, amount: Number(d.monto),
+                isSharedPayment: d.es_compartido, siblingIndices: d.hermanos_idx || []
+            })) || [];
+            setCache(CACHE_KEYS.paymentHistory, history);
+            return history;
+        } catch (e) {
+            console.warn('Failed to fetch payment history from Supabase:', e);
+        }
     }
+    
+    // Fallback to cache
+    const cached = getCache(CACHE_KEYS.paymentHistory);
+    if (cached) return cached;
+    return [];
 }
 
 async function addPaymentToHistory(studentIndex, weekIndex, amount, isSharedPayment, siblingIndices) {
     try {
-        const { error } = await supabaseClient
+        const { data, error } = await supabaseClient
             .from('historial_pagos')
-            .insert({ fecha: new Date().toISOString(), alumno_idx: studentIndex, semana_idx: weekIndex, monto: amount, es_compartido: isSharedPayment, hermanos_idx: siblingIndices });
+            .insert({ fecha: new Date().toISOString(), alumno_idx: studentIndex, semana_idx: weekIndex, monto: amount, es_compartido: isSharedPayment, hermanos_idx: siblingIndices })
+            .select().single();
         if (error) throw error;
+        
+        // Update local cache
+        const history = getCache(CACHE_KEYS.paymentHistory) || [];
+        history.push({
+            id: data.id,
+            date: data.fecha,
+            studentIndex: data.alumno_idx,
+            weekIndex: data.semana_idx,
+            amount: Number(data.monto),
+            isSharedPayment: data.es_compartido,
+            siblingIndices: data.hermanos_idx || []
+        });
+        setCache(CACHE_KEYS.paymentHistory, history);
         return true;
     } catch (e) {
         console.error('Error adding payment to history:', e);
