@@ -169,21 +169,33 @@ async function checkRealConnectivity() {
         return false;
     }
     
-    // Browser says online - verify with a quick lightweight fetch
+    // Browser says online - verify with a lightweight Supabase query
+    // Use the Supabase client (which handles auth headers correctly) to query a small table
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
         
-        // Use a lightweight Supabase health check or HEAD request
-        await fetch(`${supabaseClient.supabaseUrl}/rest/v1/`, { 
-            method: 'HEAD', 
-            signal: controller.signal,
-            headers: { 'apikey': supabaseClient.supabaseKey }
-        });
+        // Use a simple query on a small table (semanas) via the Supabase client
+        // This uses the client's built-in auth (anon key via Authorization header)
+        const { error } = await supabaseClient
+            .from('semanas')
+            .select('id')
+            .limit(1)
+            .abortSignal(controller.signal);
         
         clearTimeout(timeoutId);
-        cachedConnectivityResult = true;
+        
+        if (error) {
+            console.warn('Connectivity check query error:', error);
+            cachedConnectivityResult = false;
+        } else {
+            cachedConnectivityResult = true;
+        }
     } catch (e) {
+        // AbortError or network error = offline
+        if (e.name !== 'AbortError') {
+            console.warn('Connectivity check failed:', e);
+        }
         cachedConnectivityResult = false;
     }
     
