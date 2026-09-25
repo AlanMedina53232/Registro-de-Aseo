@@ -150,6 +150,47 @@ function clearOfflineQueue() {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
 }
 
+// ==================== CONNECTIVITY CHECK ====================
+let lastConnectivityCheck = 0;
+let cachedConnectivityResult = null;
+const CONNECTIVITY_CACHE_MS = 30000; // Cache connectivity result for 30 seconds
+
+async function checkRealConnectivity() {
+    const now = Date.now();
+    // Return cached result if recent
+    if (cachedConnectivityResult !== null && (now - lastConnectivityCheck) < CONNECTIVITY_CACHE_MS) {
+        return cachedConnectivityResult;
+    }
+    
+    // Browser says offline - definitely offline
+    if (!navigator.onLine) {
+        cachedConnectivityResult = false;
+        lastConnectivityCheck = now;
+        return false;
+    }
+    
+    // Browser says online - verify with a quick lightweight fetch
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+        
+        // Use a lightweight Supabase health check or HEAD request
+        await fetch(`${supabaseClient.supabaseUrl}/rest/v1/`, { 
+            method: 'HEAD', 
+            signal: controller.signal,
+            headers: { 'apikey': supabaseClient.supabaseKey }
+        });
+        
+        clearTimeout(timeoutId);
+        cachedConnectivityResult = true;
+    } catch (e) {
+        cachedConnectivityResult = false;
+    }
+    
+    lastConnectivityCheck = now;
+    return cachedConnectivityResult;
+}
+
 function isOnline() {
     return navigator.onLine;
 }
@@ -157,7 +198,8 @@ function isOnline() {
 // ==================== CLOUD-FIRST FETCH HELPER ====================
 // Fetches from Supabase when online, falls back to localStorage when offline
 async function fetchFromCloudOrCache(fetchFromSupabase, cacheKey, defaultValue) {
-    if (isOnline()) {
+    const online = await checkRealConnectivity();
+    if (online) {
         try {
             const data = await fetchFromSupabase();
             if (data !== null && data !== undefined) {
@@ -166,9 +208,11 @@ async function fetchFromCloudOrCache(fetchFromSupabase, cacheKey, defaultValue) 
             }
         } catch (e) {
             console.warn('Cloud fetch failed, falling back to cache:', e);
+            // Invalidate connectivity cache on failure
+            cachedConnectivityResult = null;
         }
     }
-    // Offline or cloud fetch failed - use cache
+    // Offline or cloud fetch failed - use cache immediately
     const cached = getCache(cacheKey);
     return cached !== null ? cached : defaultValue;
 }
@@ -297,8 +341,8 @@ async function syncStudentsFromSupabase() {
 }
 
 async function saveStudents(students) {
-    // CLOUD-FIRST: Write to Supabase immediately when online
-    if (isOnline()) {
+    // CLOUD-FIRST: Write to Supabase immediately when online with real connectivity
+    if (await checkRealConnectivity()) {
         try {
             await saveStudentsToSupabase(students);
             setCache(CACHE_KEYS.students, students);
@@ -361,7 +405,7 @@ async function syncWeeksFromSupabase() {
 }
 
 async function saveWeeks(weeks) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await saveWeeksToSupabase(weeks);
             setCache(CACHE_KEYS.weeks, weeks);
@@ -426,7 +470,7 @@ async function syncSettingsFromSupabase() {
 }
 
 async function saveSettings(settings) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await saveSettingsToSupabase(settings);
             setCache(CACHE_KEYS.settings, settings);
@@ -482,7 +526,7 @@ async function syncPaymentsFromSupabase() {
 }
 
 async function savePayments(payments) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await savePaymentsToSupabase(payments);
             setCache(CACHE_KEYS.payments, payments);
@@ -551,7 +595,7 @@ async function syncDaysToPayFromSupabase() {
 }
 
 async function saveDaysToPay(days) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await saveDaysToPayToSupabase(days);
             setCache(CACHE_KEYS.daysToPay, days);
@@ -618,7 +662,7 @@ async function syncMovementsFromSupabase() {
 }
 
 async function addMovement(type, weekIndex, amount, description) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             return await addMovementToSupabase(type, weekIndex, amount, description);
         } catch (e) {
@@ -721,7 +765,7 @@ async function syncSiblingsFromSupabase() {
 }
 
 async function saveSiblings(siblings) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await saveSiblingsToSupabase(siblings);
             setCache(CACHE_KEYS.siblings, siblings);
@@ -799,7 +843,7 @@ async function syncSavedWeeksFromSupabase() {
 }
 
 async function saveWeek(weekIndex) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await saveWeekToSupabase(weekIndex);
             const saved = getCache(CACHE_KEYS.savedWeeks) || {};
@@ -866,7 +910,7 @@ async function syncPaymentHistoryFromSupabase() {
 }
 
 async function addPaymentToHistory(studentIndex, weekIndex, amount, isSharedPayment, siblingIndices) {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             return await addPaymentToHistoryToSupabase(studentIndex, weekIndex, amount, isSharedPayment, siblingIndices);
         } catch (e) {
@@ -922,7 +966,7 @@ async function getLastPaymentEntry() {
 }
 
 async function removeLastPaymentEntry() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await removeLastPaymentEntryToSupabase();
             const history = await getPaymentHistory();
@@ -971,7 +1015,7 @@ function formatDate(dateString) {
 
 // ==================== CLEAR SPECIFIC TABLES ====================
 async function clearPayments() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearPaymentsToSupabase();
             setCache(CACHE_KEYS.payments, {});
@@ -990,7 +1034,7 @@ async function clearPaymentsToSupabase() {
 }
 
 async function clearDaysToPay() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearDaysToPayToSupabase();
             setCache(CACHE_KEYS.daysToPay, {});
@@ -1009,7 +1053,7 @@ async function clearDaysToPayToSupabase() {
 }
 
 async function clearMovements() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearMovementsToSupabase();
             setCache(CACHE_KEYS.movements, []);
@@ -1028,7 +1072,7 @@ async function clearMovementsToSupabase() {
 }
 
 async function clearSiblings() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearSiblingsToSupabase();
             setCache(CACHE_KEYS.siblings, []);
@@ -1047,7 +1091,7 @@ async function clearSiblingsToSupabase() {
 }
 
 async function clearSavedWeeks() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearSavedWeeksToSupabase();
             setCache(CACHE_KEYS.savedWeeks, {});
@@ -1066,7 +1110,7 @@ async function clearSavedWeeksToSupabase() {
 }
 
 async function clearPaymentHistory() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await clearPaymentHistoryToSupabase();
             setCache(CACHE_KEYS.paymentHistory, []);
@@ -1085,7 +1129,7 @@ async function clearPaymentHistoryToSupabase() {
 }
 
 async function resetAllData() {
-    if (isOnline()) {
+    if (await checkRealConnectivity()) {
         try {
             await resetAllDataToSupabase();
             // Reset local cache after successful cloud reset
