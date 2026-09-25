@@ -1,4 +1,4 @@
-// Supabase Data Layer - Fully Offline-First Architecture (WhatsApp-style)
+// Supabase Data Layer - Cloud-First Hybrid Strategy (Real-time sync when online)
 const DEFAULT_STUDENTS = [
   "Aboytes Cota Danna Victoria",
   "Arechiga Lopez Susana Espranza",
@@ -154,6 +154,25 @@ function isOnline() {
     return navigator.onLine;
 }
 
+// ==================== CLOUD-FIRST FETCH HELPER ====================
+// Fetches from Supabase when online, falls back to localStorage when offline
+async function fetchFromCloudOrCache(fetchFromSupabase, cacheKey, defaultValue) {
+    if (isOnline()) {
+        try {
+            const data = await fetchFromSupabase();
+            if (data !== null && data !== undefined) {
+                setCache(cacheKey, data);
+                return data;
+            }
+        } catch (e) {
+            console.warn('Cloud fetch failed, falling back to cache:', e);
+        }
+    }
+    // Offline or cloud fetch failed - use cache
+    const cached = getCache(cacheKey);
+    return cached !== null ? cached : defaultValue;
+}
+
 // ==================== BACKGROUND SYNC ====================
 let syncInProgress = false;
 
@@ -241,15 +260,23 @@ async function executeOfflineOperation(operation) {
 }
 
 // ==================== STUDENTS ====================
-// STORAGE-FIRST: Read from localStorage immediately, sync in background
-function getStudents() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.students);
-    if (cached) return cached;
-    return DEFAULT_STUDENTS;
+// CLOUD-FIRST: Fetch from Supabase when online, fallback to localStorage when offline
+async function getStudents() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('alumnos')
+                .select('id, nombre, orden')
+                .order('orden', { ascending: true });
+            if (error) throw error;
+            return data && data.length > 0 ? data.map(d => d.nombre) : DEFAULT_STUDENTS;
+        },
+        CACHE_KEYS.students,
+        DEFAULT_STUDENTS
+    );
 }
 
-// Background sync to Supabase
+// Background sync to Supabase (kept for manual sync)
 async function syncStudentsFromSupabase() {
     if (!isOnline()) return;
     try {
@@ -270,10 +297,18 @@ async function syncStudentsFromSupabase() {
 }
 
 async function saveStudents(students) {
-    // IMMEDIATE: Update localStorage first
+    // CLOUD-FIRST: Write to Supabase immediately when online
+    if (isOnline()) {
+        try {
+            await saveStudentsToSupabase(students);
+            setCache(CACHE_KEYS.students, students);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
+    // Offline or cloud save failed - queue for later
     setCache(CACHE_KEYS.students, students);
-    
-    // QUEUE: Add to offline queue for Supabase sync
     addToOfflineQueue({ type: 'saveStudents', data: students });
     return true;
 }
@@ -291,11 +326,19 @@ async function initializeDefaultStudents() {
 }
 
 // ==================== WEEKS ====================
-function getWeeks() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.weeks);
-    if (cached) return cached;
-    return DEFAULT_WEEKS;
+async function getWeeks() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('semanas')
+                .select('id, nombre, orden')
+                .order('orden', { ascending: true });
+            if (error) throw error;
+            return data && data.length > 0 ? data.map(d => d.nombre) : DEFAULT_WEEKS;
+        },
+        CACHE_KEYS.weeks,
+        DEFAULT_WEEKS
+    );
 }
 
 async function syncWeeksFromSupabase() {
@@ -318,6 +361,15 @@ async function syncWeeksFromSupabase() {
 }
 
 async function saveWeeks(weeks) {
+    if (isOnline()) {
+        try {
+            await saveWeeksToSupabase(weeks);
+            setCache(CACHE_KEYS.weeks, weeks);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.weeks, weeks);
     addToOfflineQueue({ type: 'saveWeeks', data: weeks });
     return true;
@@ -336,11 +388,22 @@ async function initializeDefaultWeeks() {
 }
 
 // ==================== SETTINGS ====================
-function getSettings() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.settings);
-    if (cached) return cached;
-    return { ...DEFAULT_SETTINGS };
+async function getSettings() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('configuracion')
+                .select('clave, valor')
+                .single();
+            if (error && error.code !== 'PGRST116') throw error;
+            if (data) {
+                return { weeklyFee: parseInt(data.valor?.cuota_semanal) || DEFAULT_SETTINGS.weeklyFee };
+            }
+            return { ...DEFAULT_SETTINGS };
+        },
+        CACHE_KEYS.settings,
+        { ...DEFAULT_SETTINGS }
+    );
 }
 
 async function syncSettingsFromSupabase() {
@@ -363,6 +426,15 @@ async function syncSettingsFromSupabase() {
 }
 
 async function saveSettings(settings) {
+    if (isOnline()) {
+        try {
+            await saveSettingsToSupabase(settings);
+            setCache(CACHE_KEYS.settings, settings);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.settings, settings);
     addToOfflineQueue({ type: 'saveSettings', data: settings });
     return true;
@@ -376,11 +448,20 @@ async function saveSettingsToSupabase(settings) {
 }
 
 // ==================== PAYMENTS ====================
-function getPayments() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.payments);
-    if (cached) return cached;
-    return {};
+async function getPayments() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('pagos')
+                .select('alumno_idx, semana_idx, estado');
+            if (error) throw error;
+            const payments = {};
+            data?.forEach(d => { payments[generatePaymentKey(d.alumno_idx, d.semana_idx)] = d.estado; });
+            return payments;
+        },
+        CACHE_KEYS.payments,
+        {}
+    );
 }
 
 async function syncPaymentsFromSupabase() {
@@ -401,6 +482,15 @@ async function syncPaymentsFromSupabase() {
 }
 
 async function savePayments(payments) {
+    if (isOnline()) {
+        try {
+            await savePaymentsToSupabase(payments);
+            setCache(CACHE_KEYS.payments, payments);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.payments, payments);
     addToOfflineQueue({ type: 'savePayments', data: payments });
     return true;
@@ -419,20 +509,28 @@ async function savePaymentsToSupabase(payments) {
 }
 
 async function updatePayment(studentIndex, weekIndex, status) {
-    const payments = getCache(CACHE_KEYS.payments) || {};
+    const payments = (await getPayments()) || {};
     const key = generatePaymentKey(studentIndex, weekIndex);
     payments[key] = status;
-    setCache(CACHE_KEYS.payments, payments);
-    addToOfflineQueue({ type: 'savePayments', data: payments });
+    await savePayments(payments);
     return true;
 }
 
 // ==================== DAYS TO PAY ====================
-function getDaysToPay() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.daysToPay);
-    if (cached) return cached;
-    return {};
+async function getDaysToPay() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('dias_aseo')
+                .select('semana_idx, dias');
+            if (error) throw error;
+            const days = {};
+            data?.forEach(d => { days[d.semana_idx] = d.dias; });
+            return days;
+        },
+        CACHE_KEYS.daysToPay,
+        {}
+    );
 }
 
 async function syncDaysToPayFromSupabase() {
@@ -453,6 +551,15 @@ async function syncDaysToPayFromSupabase() {
 }
 
 async function saveDaysToPay(days) {
+    if (isOnline()) {
+        try {
+            await saveDaysToPayToSupabase(days);
+            setCache(CACHE_KEYS.daysToPay, days);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.daysToPay, days);
     addToOfflineQueue({ type: 'saveDaysToPay', data: days });
     return true;
@@ -470,11 +577,23 @@ async function saveDaysToPayToSupabase(days) {
 }
 
 // ==================== MOVEMENTS ====================
-function getMovements() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.movements);
-    if (cached) return cached;
-    return [];
+async function getMovements() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('movimientos')
+                .select('id, fecha, semana_idx, tipo, monto, descripcion, saldo')
+                .order('fecha', { ascending: true });
+            if (error) throw error;
+            return data?.map(d => ({
+                id: d.id, date: d.fecha, weekIndex: d.semana_idx,
+                type: d.tipo, amount: Number(d.monto), description: d.descripcion,
+                balance: Number(d.saldo)
+            })) || [];
+        },
+        CACHE_KEYS.movements,
+        []
+    );
 }
 
 async function syncMovementsFromSupabase() {
@@ -499,11 +618,18 @@ async function syncMovementsFromSupabase() {
 }
 
 async function addMovement(type, weekIndex, amount, description) {
+    if (isOnline()) {
+        try {
+            return await addMovementToSupabase(type, weekIndex, amount, description);
+        } catch (e) {
+            console.warn('Cloud add movement failed, falling back to local queue:', e);
+        }
+    }
+    // Offline or cloud failed - optimistic update + queue
     const cachedMovements = getCache(CACHE_KEYS.movements) || [];
     const lastBalance = cachedMovements.length > 0 ? cachedMovements[cachedMovements.length - 1].balance : 0;
     const balance = type === 'income' ? lastBalance + amount : lastBalance - amount;
     
-    // IMMEDIATE: Create optimistic movement for instant UI update
     const optimisticMovement = {
         id: `offline-${Date.now()}`,
         date: new Date().toISOString(),
@@ -517,10 +643,7 @@ async function addMovement(type, weekIndex, amount, description) {
     
     const updatedMovements = [...cachedMovements, optimisticMovement];
     setCache(CACHE_KEYS.movements, updatedMovements);
-    
-    // QUEUE: Add to offline queue for Supabase sync
     addToOfflineQueue({ type: 'addMovement', data: { type, weekIndex, amount, description } });
-    
     return optimisticMovement;
 }
 
@@ -550,11 +673,27 @@ async function addMovementToSupabase(type, weekIndex, amount, description) {
 }
 
 // ==================== SIBLINGS ====================
-function getSiblings() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.siblings);
-    if (cached) return cached;
-    return [];
+async function getSiblings() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('hermanos')
+                .select('id, grupo_idx, alumno_idx, pago_compartido')
+                .order('grupo_idx', { ascending: true });
+            if (error) throw error;
+            if (data && data.length > 0) {
+                const groups = {};
+                data.forEach(d => {
+                    if (!groups[d.grupo_idx]) groups[d.grupo_idx] = { members: [], sharedPayment: d.pago_compartido };
+                    groups[d.grupo_idx].members.push(d.alumno_idx);
+                });
+                return Object.values(groups);
+            }
+            return [];
+        },
+        CACHE_KEYS.siblings,
+        []
+    );
 }
 
 async function syncSiblingsFromSupabase() {
@@ -582,6 +721,15 @@ async function syncSiblingsFromSupabase() {
 }
 
 async function saveSiblings(siblings) {
+    if (isOnline()) {
+        try {
+            await saveSiblingsToSupabase(siblings);
+            setCache(CACHE_KEYS.siblings, siblings);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.siblings, siblings);
     addToOfflineQueue({ type: 'saveSiblings', data: siblings });
     return true;
@@ -617,11 +765,20 @@ function isSiblingException(studentIndex, siblings) {
 }
 
 // ==================== SAVED WEEKS ====================
-function getSavedWeeks() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.savedWeeks);
-    if (cached) return cached;
-    return {};
+async function getSavedWeeks() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('semanas_cerradas')
+                .select('semana_idx');
+            if (error) throw error;
+            const saved = {};
+            data?.forEach(d => { saved[d.semana_idx] = true; });
+            return saved;
+        },
+        CACHE_KEYS.savedWeeks,
+        {}
+    );
 }
 
 async function syncSavedWeeksFromSupabase() {
@@ -642,6 +799,17 @@ async function syncSavedWeeksFromSupabase() {
 }
 
 async function saveWeek(weekIndex) {
+    if (isOnline()) {
+        try {
+            await saveWeekToSupabase(weekIndex);
+            const saved = getCache(CACHE_KEYS.savedWeeks) || {};
+            saved[weekIndex] = true;
+            setCache(CACHE_KEYS.savedWeeks, saved);
+            return true;
+        } catch (e) {
+            console.warn('Cloud save failed, falling back to local queue:', e);
+        }
+    }
     const saved = getCache(CACHE_KEYS.savedWeeks) || {};
     saved[weekIndex] = true;
     setCache(CACHE_KEYS.savedWeeks, saved);
@@ -657,11 +825,23 @@ async function saveWeekToSupabase(weekIndex) {
 }
 
 // ==================== PAYMENT HISTORY ====================
-function getPaymentHistory() {
-    ensureCacheInitialized();
-    const cached = getCache(CACHE_KEYS.paymentHistory);
-    if (cached) return cached;
-    return [];
+async function getPaymentHistory() {
+    return fetchFromCloudOrCache(
+        async () => {
+            const { data, error } = await supabaseClient
+                .from('historial_pagos')
+                .select('id, fecha, alumno_idx, semana_idx, monto, es_compartido, hermanos_idx')
+                .order('fecha', { ascending: true });
+            if (error) throw error;
+            return data?.map(d => ({
+                id: d.id, date: d.fecha, studentIndex: d.alumno_idx,
+                weekIndex: d.semana_idx, amount: Number(d.monto),
+                isSharedPayment: d.es_compartido, siblingIndices: d.hermanos_idx || []
+            })) || [];
+        },
+        CACHE_KEYS.paymentHistory,
+        []
+    );
 }
 
 async function syncPaymentHistoryFromSupabase() {
@@ -686,7 +866,14 @@ async function syncPaymentHistoryFromSupabase() {
 }
 
 async function addPaymentToHistory(studentIndex, weekIndex, amount, isSharedPayment, siblingIndices) {
-    // IMMEDIATE: Add to local cache for instant UI update
+    if (isOnline()) {
+        try {
+            return await addPaymentToHistoryToSupabase(studentIndex, weekIndex, amount, isSharedPayment, siblingIndices);
+        } catch (e) {
+            console.warn('Cloud add payment history failed, falling back to local queue:', e);
+        }
+    }
+    // Offline or cloud failed - optimistic update + queue
     const history = getCache(CACHE_KEYS.paymentHistory) || [];
     const optimisticEntry = {
         id: `offline-${Date.now()}`,
@@ -700,8 +887,6 @@ async function addPaymentToHistory(studentIndex, weekIndex, amount, isSharedPaym
     };
     history.push(optimisticEntry);
     setCache(CACHE_KEYS.paymentHistory, history);
-    
-    // QUEUE: Add to offline queue for Supabase sync
     addToOfflineQueue({ type: 'addPaymentToHistory', data: { studentIndex, weekIndex, amount, isSharedPayment, siblingIndices } });
     return true;
 }
@@ -732,19 +917,30 @@ async function addPaymentToHistoryToSupabase(studentIndex, weekIndex, amount, is
 }
 
 async function getLastPaymentEntry() {
-    const history = getPaymentHistory();
+    const history = await getPaymentHistory();
     return history.length > 0 ? history[history.length - 1] : null;
 }
 
 async function removeLastPaymentEntry() {
-    // IMMEDIATE: Remove from local cache
+    if (isOnline()) {
+        try {
+            await removeLastPaymentEntryToSupabase();
+            const history = await getPaymentHistory();
+            if (history.length > 0) {
+                history.pop();
+                setCache(CACHE_KEYS.paymentHistory, history);
+            }
+            return true;
+        } catch (e) {
+            console.warn('Cloud remove last payment failed, falling back to local queue:', e);
+        }
+    }
+    // Offline or cloud failed
     const history = getCache(CACHE_KEYS.paymentHistory) || [];
     if (history.length > 0) {
         history.pop();
         setCache(CACHE_KEYS.paymentHistory, history);
     }
-    
-    // QUEUE: Add to offline queue
     addToOfflineQueue({ type: 'removeLastPaymentEntry', data: {} });
     return true;
 }
@@ -775,6 +971,15 @@ function formatDate(dateString) {
 
 // ==================== CLEAR SPECIFIC TABLES ====================
 async function clearPayments() {
+    if (isOnline()) {
+        try {
+            await clearPaymentsToSupabase();
+            setCache(CACHE_KEYS.payments, {});
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.payments, {});
     addToOfflineQueue({ type: 'clearPayments', data: {} });
     return true;
@@ -785,6 +990,15 @@ async function clearPaymentsToSupabase() {
 }
 
 async function clearDaysToPay() {
+    if (isOnline()) {
+        try {
+            await clearDaysToPayToSupabase();
+            setCache(CACHE_KEYS.daysToPay, {});
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.daysToPay, {});
     addToOfflineQueue({ type: 'clearDaysToPay', data: {} });
     return true;
@@ -795,6 +1009,15 @@ async function clearDaysToPayToSupabase() {
 }
 
 async function clearMovements() {
+    if (isOnline()) {
+        try {
+            await clearMovementsToSupabase();
+            setCache(CACHE_KEYS.movements, []);
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.movements, []);
     addToOfflineQueue({ type: 'clearMovements', data: {} });
     return true;
@@ -805,6 +1028,15 @@ async function clearMovementsToSupabase() {
 }
 
 async function clearSiblings() {
+    if (isOnline()) {
+        try {
+            await clearSiblingsToSupabase();
+            setCache(CACHE_KEYS.siblings, []);
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.siblings, []);
     addToOfflineQueue({ type: 'clearSiblings', data: {} });
     return true;
@@ -815,6 +1047,15 @@ async function clearSiblingsToSupabase() {
 }
 
 async function clearSavedWeeks() {
+    if (isOnline()) {
+        try {
+            await clearSavedWeeksToSupabase();
+            setCache(CACHE_KEYS.savedWeeks, {});
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.savedWeeks, {});
     addToOfflineQueue({ type: 'clearSavedWeeks', data: {} });
     return true;
@@ -825,6 +1066,15 @@ async function clearSavedWeeksToSupabase() {
 }
 
 async function clearPaymentHistory() {
+    if (isOnline()) {
+        try {
+            await clearPaymentHistoryToSupabase();
+            setCache(CACHE_KEYS.paymentHistory, []);
+            return true;
+        } catch (e) {
+            console.warn('Cloud clear failed, falling back to local queue:', e);
+        }
+    }
     setCache(CACHE_KEYS.paymentHistory, []);
     addToOfflineQueue({ type: 'clearPaymentHistory', data: {} });
     return true;
@@ -835,7 +1085,25 @@ async function clearPaymentHistoryToSupabase() {
 }
 
 async function resetAllData() {
-    // IMMEDIATE: Reset all localStorage
+    if (isOnline()) {
+        try {
+            await resetAllDataToSupabase();
+            // Reset local cache after successful cloud reset
+            setCache(CACHE_KEYS.students, DEFAULT_STUDENTS);
+            setCache(CACHE_KEYS.weeks, DEFAULT_WEEKS);
+            setCache(CACHE_KEYS.settings, DEFAULT_SETTINGS);
+            setCache(CACHE_KEYS.payments, {});
+            setCache(CACHE_KEYS.daysToPay, {});
+            setCache(CACHE_KEYS.movements, []);
+            setCache(CACHE_KEYS.siblings, []);
+            setCache(CACHE_KEYS.savedWeeks, {});
+            setCache(CACHE_KEYS.paymentHistory, []);
+            return true;
+        } catch (e) {
+            console.warn('Cloud reset failed, falling back to local queue:', e);
+        }
+    }
+    // Offline or cloud failed - reset local only, queue for sync
     setCache(CACHE_KEYS.students, DEFAULT_STUDENTS);
     setCache(CACHE_KEYS.weeks, DEFAULT_WEEKS);
     setCache(CACHE_KEYS.settings, DEFAULT_SETTINGS);
@@ -844,9 +1112,7 @@ async function resetAllData() {
     setCache(CACHE_KEYS.movements, []);
     setCache(CACHE_KEYS.siblings, []);
     setCache(CACHE_KEYS.savedWeeks, {});
-    setCache(CACHE_KEYS.paymentHistory, []);
-    
-    // QUEUE: Add to offline queue
+    setCache(CACHE_KEYS.paymentHistory, {});
     addToOfflineQueue({ type: 'resetAllData', data: {} });
     return true;
 }
@@ -883,13 +1149,68 @@ async function syncAllFromSupabase() {
     ]);
 }
 
+// ==================== REALTIME SUBSCRIPTIONS ====================
+let realtimeChannels = [];
+
+function setupRealtimeSubscriptions() {
+    if (!isOnline()) return;
+    
+    // Clean up existing channels
+    realtimeChannels.forEach(ch => supabaseClient.removeChannel(ch));
+    realtimeChannels = [];
+    
+    const tables = [
+        { table: 'alumnos', syncFn: syncStudentsFromSupabase },
+        { table: 'semanas', syncFn: syncWeeksFromSupabase },
+        { table: 'configuracion', syncFn: syncSettingsFromSupabase },
+        { table: 'pagos', syncFn: syncPaymentsFromSupabase },
+        { table: 'dias_aseo', syncFn: syncDaysToPayFromSupabase },
+        { table: 'movimientos', syncFn: syncMovementsFromSupabase },
+        { table: 'hermanos', syncFn: syncSiblingsFromSupabase },
+        { table: 'semanas_cerradas', syncFn: syncSavedWeeksFromSupabase },
+        { table: 'historial_pagos', syncFn: syncPaymentHistoryFromSupabase }
+    ];
+    
+    tables.forEach(({ table, syncFn }) => {
+        const channel = supabaseClient
+            .channel(`realtime-${table}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table }, async (payload) => {
+                console.log(`[Realtime] Change detected in ${table}:`, payload.eventType);
+                await syncFn();
+                // Trigger UI refresh in app.js
+                window.dispatchEvent(new CustomEvent('data-updated', { detail: { table } }));
+            })
+            .subscribe();
+        realtimeChannels.push(channel);
+    });
+    
+    console.log('[Realtime] Subscriptions active for', tables.length, 'tables');
+}
+
+function cleanupRealtimeSubscriptions() {
+    realtimeChannels.forEach(ch => supabaseClient.removeChannel(ch));
+    realtimeChannels = [];
+    console.log('[Realtime] Subscriptions cleaned up');
+}
+
 // ==================== ONLINE EVENT LISTENER ====================
 window.addEventListener('online', async () => {
     console.log('Connection restored - starting background sync...');
     await syncAllFromSupabase();
     await syncOfflineQueue();
+    setupRealtimeSubscriptions();
     console.log('Background sync completed');
 });
+
+window.addEventListener('offline', () => {
+    console.log('Connection lost - cleaning up realtime subscriptions');
+    cleanupRealtimeSubscriptions();
+});
+
+// Initialize realtime subscriptions if online
+if (isOnline()) {
+    setupRealtimeSubscriptions();
+}
 
 // Initialize cache on load
 ensureCacheInitialized();
@@ -924,6 +1245,7 @@ window.DataAPI = {
     PAYMENT_STATUS,
     DEFAULT_SETTINGS, DEFAULT_STUDENTS, DEFAULT_WEEKS,
     generatePaymentKey,
-    // Offline functions
-    isOnline, syncOfflineQueue, forceSyncNow, getPendingSyncCount
+    // Offline/Realtime functions
+    isOnline, syncOfflineQueue, forceSyncNow, getPendingSyncCount,
+    setupRealtimeSubscriptions, cleanupRealtimeSubscriptions
 };

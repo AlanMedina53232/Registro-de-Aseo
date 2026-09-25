@@ -60,7 +60,7 @@ async function loadData() {
     console.log('[loadData] Iniciando carga de datos. Online:', isOnline);
     
     try {
-        // Cargar datos en paralelo - las funciones DataAPI ya leen del localStorage primero
+        // Cargar datos en paralelo - Cloud-first: consulta Supabase cuando hay internet
         const [studentsData, weeksData, settingsData, paymentsData, daysToPayData, movementsData, siblingsData, savedWeeksData] = await Promise.all([
             DataAPI.getStudents(),
             DataAPI.getWeeks(),
@@ -89,7 +89,7 @@ async function loadData() {
             movements: movements.length,
             siblings: siblings.length,
             savedWeeksCount: Object.keys(savedWeeks).length,
-            source: navigator.onLine ? 'Supabase + Cache' : 'localStorage (Offline)'
+            source: navigator.onLine ? 'Supabase (Cloud-First)' : 'localStorage (Offline)'
         });
         
         // Mostrar indicador visual de estado de conexión
@@ -692,28 +692,25 @@ async function updateSiblingMember(groupIndex, memberPos, newStudentIndex) {
 }
 
 async function setupEventListeners() {
-    // Online/Offline detection for auto-sync
-    let wasOffline = !navigator.onLine;
+    // Listen for realtime data updates from DataAPI
+    window.addEventListener('data-updated', async (e) => {
+        console.log('[App] Realtime update received for:', e.detail?.table);
+        await loadData();
+        renderTable();
+        renderFundView();
+        renderPaymentPanel();
+        await renderRevertPanel();
+        renderSiblings();
+        showToast(`Datos actualizados desde otro dispositivo`, 'info');
+    });
     
-    window.addEventListener('online', async () => {
-        console.log('[App] Connection restored, syncing offline queue...');
-        const result = await DataAPI.syncOfflineQueue();
-        if (result.synced > 0) {
-            console.log(`[App] Synced ${result.synced} operations from offline queue`);
-            // Refresh data from Supabase after sync
-            await loadData();
-            renderTable();
-            renderFundView();
-            renderPaymentPanel();
-            renderRevertPanel();
-            showToast(`Sincronizados ${result.synced} cambios pendientes`);
-        }
-        wasOffline = false;
+    // Connection status indicator
+    window.addEventListener('online', () => {
+        updateConnectionIndicator(true);
     });
     
     window.addEventListener('offline', () => {
-        console.log('[App] Gone offline, changes will be queued locally');
-        wasOffline = true;
+        updateConnectionIndicator(false);
         showToast('Modo offline: los cambios se guardarán localmente', 'warning');
     });
     
